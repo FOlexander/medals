@@ -120,10 +120,15 @@ def dative_surname(surname: str, gender: Optional[str] = None) -> str:
     low = s.lower()
     if not s:
         return s
+    if low.endswith("ко"):
+        # Feminine surnames on -ко do not decline; masculine must decline
+        if gender == "f":
+            return s
+        return s[:-1] + ("у" if s[-1].islower() else "У")
     if low.endswith("енко"):
         return s[:-1] + ("у" if s[-1].islower() else "У")
-    if low.endswith("ко"):
-        return s[:-1] + ("у" if s[-1].islower() else "У")
+    if low.endswith("ук") or low.endswith("ик"):
+        return s + ("у" if s[-1].islower() else "У")
     if low.endswith("о"):
         return s[:-1] + ("у" if s[-1].islower() else "У")
     if low.endswith("а"):
