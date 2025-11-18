@@ -3,6 +3,7 @@ import sys
 from copy import deepcopy
 from typing import List, Optional, Dict, Tuple
 import os
+import tempfile
 
 try:
     from docx import Document
@@ -177,7 +178,6 @@ def to_dative_fullname(fullname: str) -> str:
         out.append(dative_first_name(n))
     if p:
         out.append(dative_patronymic(p, gender))
-    print(out, s, n, p)
     return " ".join(out) if out else fullname
 
 
@@ -263,6 +263,57 @@ def flatten_headers_into_body(doc: Document):
             pass
 
 
+def _match_placeholder_case(source: str, replacement: str) -> str:
+    """
+    Try to mirror the placeholder casing for nicer typography.
+    - ALL CAPS placeholder -> uppercase replacement
+    - all lowercase -> lowercase replacement
+    - Title case -> capitalize each word
+    """
+    if not source or not replacement:
+        return replacement
+
+    letters = [ch for ch in source if ch.isalpha()]
+    if letters and all(ch.isupper() for ch in letters):
+        return replacement.upper()
+    if letters and all(ch.islower() for ch in letters):
+        return replacement.lower()
+    if source[0].isupper() and (len(source) == 1 or source[1:].islower()):
+        return " ".join(word.capitalize() for word in replacement.split())
+    return replacement
+
+
+def _build_replacement_mapping(
+    fullname: str,
+    placeholders: List[str],
+    surname_placeholder: Optional[str] = None,
+    name_placeholder: Optional[str] = None,
+    patronymic_placeholder: Optional[str] = None,
+) -> Dict[str, str]:
+    """
+    Build a mapping of placeholder -> replacement text for a given person, supporting
+    both full-name placeholders and split surname/name/patronymic placeholders.
+    """
+    s, n, p = split_fullname(fullname)
+    gender = guess_gender_from_patronymic(p)
+
+    mapping: Dict[str, str] = {}
+    repl_full = to_dative_fullname(fullname)
+    for ph in placeholders:
+        if ph:
+            mapping[ph] = repl_full
+
+    def assign(target: Optional[str], value: Optional[str]):
+        if target and value:
+            mapping[target] = _match_placeholder_case(target, value)
+
+    if s or fullname:
+        assign(surname_placeholder, dative_surname(s or fullname, gender))
+    assign(name_placeholder, dative_first_name(n) if n else None)
+    assign(patronymic_placeholder, dative_patronymic(p, gender) if p else None)
+    return mapping
+
+
 def generate_from_template(
     template_path: str,
     names: List[str],
@@ -270,16 +321,15 @@ def generate_from_template(
     out_path: str,
     keep_first_page: bool = True,
     flatten_for_single: bool = True,
+    surname_placeholder: Optional[str] = None,
+    name_placeholder: Optional[str] = None,
+    patronymic_placeholder: Optional[str] = None,
 ):
     if not names:
         raise ValueError("No names to process")
 
     # Build per-person docs from a fresh template, then stitch bodies together.
     out_doc = None
-
-    def build_replacement_map(fullname: str) -> Dict[str, str]:
-        repl = to_dative_fullname(fullname)
-        return {ph: repl for ph in placeholders}
 
     def _clone_header_footer(src_doc: Document, dst_doc: Document, dst_section):
         try:
@@ -326,7 +376,16 @@ def generate_from_template(
 
     for idx, person in enumerate(names):
         doc_i = Document(template_path)
-        replace_everywhere(doc_i, build_replacement_map(person))
+        replace_everywhere(
+            doc_i,
+            _build_replacement_mapping(
+                fullname=person,
+                placeholders=placeholders,
+                surname_placeholder=surname_placeholder,
+                name_placeholder=name_placeholder,
+                patronymic_placeholder=patronymic_placeholder,
+            ),
+        )
 
         if flatten_for_single:
             flatten_headers_into_body(doc_i)
@@ -357,12 +416,23 @@ def generate_separate_files(
     names: List[str],
     placeholders: List[str],
     out_dir: str = "out",
+    surname_placeholder: Optional[str] = None,
+    name_placeholder: Optional[str] = None,
+    patronymic_placeholder: Optional[str] = None,
 ):
     os.makedirs(out_dir, exist_ok=True)
     for i, person in enumerate(names, 1):
         doc = Document(template_path)
-        repl = to_dative_fullname(person)
-        replace_everywhere(doc, {ph: repl for ph in placeholders})
+        replace_everywhere(
+            doc,
+            _build_replacement_mapping(
+                fullname=person,
+                placeholders=placeholders,
+                surname_placeholder=surname_placeholder,
+                name_placeholder=name_placeholder,
+                patronymic_placeholder=patronymic_placeholder,
+            ),
+        )
         # Safe filename: use index and last name if present
         s, n, p = split_fullname(person)
         label = s or (n or f"{i}")
@@ -398,7 +468,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--excel", default="listm.xlsx", help="Path to Excel with names (default: listm.xlsx)")
     ap.add_argument("--sheet", default=None, help="Excel sheet name (default: first sheet)")
     # Names are always in the first column; no column/no-header options
-    ap.add_argument("--placeholder", action="append", default=None, help="Text to replace; can be repeated. Default targets 'Гурову Денису Сергійовичу' and common variants.")
+    ap.add_argument("--placeholder", action="append", default=None, help="Text to replace; can be repeated. Default targets the sample full-name text in the template.")
+    ap.add_argument(
+        "--placeholder-surname",
+        default="\u041f\u0410\u0412\u041b\u041e\u0412\u0423",
+        help="Placeholder text for the surname line (default: 'ПАВЛОВУ').",
+    )
+    ap.add_argument(
+        "--placeholder-name",
+        default="\u0414\u0435\u043d\u0438\u0441\u0443",
+        help="Placeholder text for the first-name line (default: 'Денису').",
+    )
+    ap.add_argument(
+        "--placeholder-patronymic",
+        default="\u0421\u0435\u0440\u0433\u0456\u0439\u043e\u0432\u0438\u0447\u0443",
+        help="Placeholder text for the patronymic line (default: 'Сергійовичу').",
+    )
     ap.add_argument("--output", default="medals_out.docx", help="Output DOCX file (default: medals_out.docx)")
     # Default to separate files for reliability (headers/footers). Allow overriding with --single.
     ap.add_argument("--separate", dest="separate", action="store_true", default=True, help="Generate separate DOCX files per person into ./out directory (default)")
@@ -427,6 +512,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Гуров",                      # bare surname variant
         ]
 
+    surname_placeholder = args.placeholder_surname or None
+    name_placeholder = args.placeholder_name or None
+    patronymic_placeholder = args.placeholder_patronymic or None
+
     # Generate document(s)
     if args.separate:
         generate_separate_files(
@@ -434,26 +523,33 @@ def main(argv: Optional[List[str]] = None) -> int:
             names=names,
             placeholders=placeholders,
             out_dir=args.out_dir,
+            surname_placeholder=surname_placeholder,
+            name_placeholder=name_placeholder,
+            patronymic_placeholder=patronymic_placeholder,
         )
         print(f"Done. Generated separate files in ./{args.out_dir}")
         print("Note: Converted from nominative using heuristic rules. Please proofread.")
         return 0
     else:
         # Build single file by composing per-person docs via docxcompose.Composer
-        # 1) Generate reliable per-person DOCX files into out_dir
-        generate_separate_files(
-            template_path=args.template,
-            names=names,
-            placeholders=placeholders,
-            out_dir=args.out_dir,
-        )
-        # 2) Merge them into a single DOCX preserving layout/headers/footers
-        try:
-            merge_docx_in_dir(args.out_dir, args.output)
-        except Exception as e:
-            print(str(e))
-            print("Merging requires 'docxcompose'. Install with: pip install docxcompose")
-            return 1
+        # Use temporary directory so no persistent out/ folder remains.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            generate_separate_files(
+                template_path=args.template,
+                names=names,
+                placeholders=placeholders,
+                out_dir=tmpdir,
+                surname_placeholder=surname_placeholder,
+                name_placeholder=name_placeholder,
+                patronymic_placeholder=patronymic_placeholder,
+            )
+            # Merge generated files into single DOCX preserving layout/headers/footers
+            try:
+                merge_docx_in_dir(tmpdir, args.output)
+            except Exception as e:
+                print(str(e))
+                print("Merging requires 'docxcompose'. Install with: pip install docxcompose")
+                return 1
         print(f"Done. Generated single file (composer): {args.output} (pages: {len(names)})")
 
     print("Note: Converted from nominative using heuristic rules. Please proofread.")
