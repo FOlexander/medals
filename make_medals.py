@@ -26,6 +26,13 @@ except Exception as e:  # pragma: no cover
     raise
 
 
+DEFAULT_SURNAME_PLACEHOLDER = "ПАВЛОВУ"
+DEFAULT_NAME_PLACEHOLDER = "Денису"
+DEFAULT_PATRONYMIC_PLACEHOLDER = "Сергійовичу"
+DEFAULT_FULL_PLACEHOLDER = f"{DEFAULT_SURNAME_PLACEHOLDER} {DEFAULT_NAME_PLACEHOLDER} {DEFAULT_PATRONYMIC_PLACEHOLDER}"
+DEFAULT_FULL_PLACEHOLDER_NOM = "ПАВЛОВ Денис Сергійович"
+
+
 """
 # ---------------------------
 # Excel helpers
@@ -471,17 +478,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--placeholder", action="append", default=None, help="Text to replace; can be repeated. Default targets the sample full-name text in the template.")
     ap.add_argument(
         "--placeholder-surname",
-        default="\u041f\u0410\u0412\u041b\u041e\u0412\u0423",
+        default=DEFAULT_SURNAME_PLACEHOLDER,
         help="Placeholder text for the surname line (default: 'ПАВЛОВУ').",
     )
     ap.add_argument(
         "--placeholder-name",
-        default="\u0414\u0435\u043d\u0438\u0441\u0443",
+        default=DEFAULT_NAME_PLACEHOLDER,
         help="Placeholder text for the first-name line (default: 'Денису').",
     )
     ap.add_argument(
         "--placeholder-patronymic",
-        default="\u0421\u0435\u0440\u0433\u0456\u0439\u043e\u0432\u0438\u0447\u0443",
+        default=DEFAULT_PATRONYMIC_PLACEHOLDER,
         help="Placeholder text for the patronymic line (default: 'Сергійовичу').",
     )
     ap.add_argument("--output", default="medals_out.docx", help="Output DOCX file (default: medals_out.docx)")
@@ -507,9 +514,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         placeholders = args.placeholder
     else:
         placeholders = [
-            "Гурову Денису Сергійовичу",  # dative full in template
-            "Гуров Денис Сергійович",     # nominative full variant
-            "Гуров",                      # bare surname variant
+            DEFAULT_FULL_PLACEHOLDER,      # dative full in template
+            DEFAULT_FULL_PLACEHOLDER_NOM,  # nominative full variant
         ]
 
     surname_placeholder = args.placeholder_surname or None
